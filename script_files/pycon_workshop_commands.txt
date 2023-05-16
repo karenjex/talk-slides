@@ -1,0 +1,315 @@
+# Ubuntu Postgres Install
+
+## as root or sudoer:
+
+sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+sudo apt-get update
+sudo apt-get -y install postgresql-15
+
+## as postgres user:
+
+export PATH=$PATH:/usr/lib/postgresql/15/bin
+export PGDATA=/var/lib/postgresql/15/main
+
+
+# Rocky Postgres Install
+
+## as root or sudoer:
+
+sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+sudo dnf -qy module disable postgresql
+dnf -y install postgresql15-server
+
+## as postgres user:
+
+export PATH=$PATH:/usr/pgsql-15/bin
+export PGDATA=/var/lib/pgsql/15/data
+
+
+# Create Postgres Cluster
+
+## as postgres user:
+
+initdb
+pg_ctl -l logfile start
+ps -ef|grep postgres
+pg_ctl stop
+
+## as root:
+
+systemctl start postgresql-15
+systemctl status postgresql-15
+
+# Create Database
+
+## as postgres user:
+psql
+CREATE DATABASE firenze;
+\l
+SELECT datname FROM pg_database;
+exit
+
+# Create Tablespace and Schema
+
+## as root or sudoer
+
+sudo mkdir -p /pycon_tablespaces/duomo
+sudo chown postgres:postgres /pycon_tablespaces/duomo
+
+## as postgres user:
+
+psql -c "CREATE TABLESPACE duomo location '/pycon_tablespaces/duomo'"
+psql
+\db
+\db+ duomo
+SELECT spcname FROM pg_tablespace;
+
+\c firenze
+CREATE SCHEMA uffizi;
+\dn
+
+exit
+
+# Create Roles
+
+## as postgres user
+
+psql -c "CREATE ROLE michelangelo"
+psql -d firenze -U michelangelo
+psql -c "CREATE USER botticelli"
+psql -d firenze -U botticelli
+\du
+
+GRANT CREATE ON DATABASE firenze TO michelangelo;
+GRANT ALL ON SCHEMA uffizi TO michelangelo;
+GRANT CREATE ON TABLESPACE duomo TO michelangelo;
+ALTER ROLE michelangelo WITH LOGIN;
+GRANT SELECT ON ALL TABLES IN SCHEMA uffizi TO botticelli;
+ALTER DEFAULT PRIVILEGES IN SCHEMA uffizi 
+GRANT SELECT ON TABLES TO botticelli;
+exit
+
+# Create Tables, Indexes, Constraints
+
+## as postgres user
+
+psql -d firenze -U michelangelo
+
+CREATE TABLE uffizi.hall (
+hall_id integer,
+hall_num text,
+floor integer,
+description text)
+TABLESPACE duomo;
+
+CREATE SEQUENCE uffizi.s_hall
+INCREMENT BY 1 MINVALUE 1 NO MAXVALUE;
+
+\ds *.*
+
+ALTER TABLE uffizi.hall
+ALTER COLUMN hall_id
+SET DEFAULT nextval('uffizi.s_hall');
+
+CREATE TABLE uffizi.artwork (
+work_id integer GENERATED ALWAYS AS IDENTITY,
+work_title text,
+work_artist text,
+hall_id integer)
+TABLESPACE duomo;
+
+\d uffizi.hall
+\d uffizi.artwork
+
+CREATE INDEX artwork_artist
+ON uffizi.artwork( lower(work_artist) )
+TABLESPACE duomo;
+
+CREATE INDEX artwork_hall_id
+ON uffizi.artwork(hall_id)
+TABLESPACE duomo;
+
+\d uffizi.artwork
+
+ALTER TABLE uffizi.hall
+ADD CONSTRAINT hall_pk PRIMARY KEY (hall_id)
+USING INDEX TABLESPACE duomo;
+
+\d uffizi.hall
+
+CREATE UNIQUE INDEX artwork_pk 
+ON uffizi.artwork(work_id)
+TABLESPACE duomo;
+
+ALTER TABLE uffizi.artwork
+ADD CONSTRAINT artwork_pk PRIMARY KEY
+USING INDEX artwork_pk;
+
+ALTER TABLE uffizi.artwork
+ADD CONSTRAINT artwork_hall_fk FOREIGN KEY (hall_id)
+REFERENCES uffizi.hall(hall_id);
+
+\d uffizi.artwork
+\d uffizi.hall
+
+SHOW search_path;
+SELECT * FROM hall;
+
+SET search_path=uffizi;
+SHOW search_path;
+SELECT * FROM hall;
+
+exit
+
+# .psqlrc File and Populating Tables
+
+## as postgres user
+
+echo 'set search_path to uffizi' >> ~/.psqlrc
+psql -d firenze -U michelangelo
+SHOW search_path;
+
+INSERT INTO hall (hall_num, floor, description) 
+VALUES ('10-14', 2, 'Botticelli'), 
+       ('35',    2, 'Michelangelo & the Florentines'), 
+       ('66',    1, 'Raffaello');
+
+SELECT * FROM hall ORDER BY hall_id;
+
+INSERT INTO artwork (work_title, work_artist, hall_id)
+SELECT 'The Spring','Botticelli', hall_id 
+FROM hall WHERE hall_num='10-14';
+
+INSERT INTO artwork (work_title, work_artist, hall_id)
+VALUES ('Tondo Doni',    'Michelangelo', 2),
+       ('Self-Portrait', 'Raffaello',    3);
+
+INSERT INTO artwork (work_title, work_artist, hall_id)
+VALUES ('Annunciation', 'Leonardo', 4);
+
+INSERT INTO hall (hall_num, floor, description) 
+VALUES ('15', 2, 'Leonardo da Vinci');
+
+INSERT INTO artwork (work_title, work_artist, hall_id)
+VALUES ('Annunciation', 'Leonardo', 4);
+
+# Creating View and Materialized View
+
+CREATE VIEW artwork_desc_view AS
+SELECT work_id, work_title||' by '||work_artist AS artwork_desc
+FROM artwork
+ORDER BY work_artist;
+
+SELECT * FROM artwork_description;
+
+CREATE MATERIALIZED VIEW artwork_desc_mview
+TABLESPACE duomo AS
+SELECT work_id, work_title||' by '||work_artist AS artwork_desc
+FROM artwork;
+
+SELECT * FROM artwork_desc_mview;
+
+UPDATE artwork 
+SET work_artist = 'Leonardo da Vinci' 
+WHERE work_artist = 'Leonardo';
+
+SELECT work_artist 
+FROM artwork 
+WHERE work_artist like 'Leonardo%';
+
+SELECT artwork_desc FROM artwork_desc_view 
+WHERE artwork_desc like '%Leonardo%';
+
+SELECT artwork_desc FROM artwork_desc_mview 
+WHERE artwork_desc like '%Leonardo%';
+
+REFRESH MATERIALIZED VIEW artwork_desc_mview;
+
+SELECT artwork_desc FROM artwork_desc_mview 
+WHERE artwork_desc like '%Leonardo%';
+
+exit
+
+# Configuring Database Connections
+
+## as postgres user
+
+vi $PGDATA/postgresql.conf
+# change listen_addresses = 'localhost' to listen_addresses = '*'
+
+vi $PGDATA/pg_hba.conf
+# add the following lines:
+
+# host  DATABASE        USER            ADDRESS                 METHOD 
+host    firenze         michelangelo    all                     scram-sha-256
+
+## as root or sudoer:
+
+sudo systemctl restart postgresql-15
+
+## as postgres user:
+
+psql -U michelangelo -d Firenze
+
+ALTER USER michelangelo WITH PASSWORD 'supersecretpassword';
+\password
+
+psql -d firenze -h 10.128.0.6 -U michelangelo
+exit
+
+echo '10.128.0.6:5432:firenze:michelangelo:secretpassword' >> ~/.pgpass
+psql -d firenze -h 10.128.0.6 -U michelangelo
+
+# Joins
+
+## Inner join
+
+SELECT a.work_id, a.work_title, a.work_artist,
+       h.hall_num, h.floor
+FROM   artwork a JOIN hall h
+ON     a.hall_id = h.hall_id;
+
+## Left outer join
+
+SELECT a.work_id, a.work_title, a.work_artist,
+       h.hall_num, h.floor
+FROM   artwork a LEFT JOIN hall h
+ON     a.hall_id = h.hall_id;
+
+## Right outer join
+
+SELECT a.work_id, a.work_title, a.work_artist,
+       h.hall_num, h.floor
+FROM   artwork a RIGHT JOIN hall h
+ON     a.hall_id = h.hall_id;
+
+## Full outer join
+
+SELECT a.work_id, a.work_title, a.work_artist,
+       h.hall_num, h.floor
+FROM   artwork a FULL JOIN hall h
+ON     a.hall_id = h.hall_id;
+
+EXPLAIN
+SELECT a.work_id, a.work_title, a.work_artist, h.hall_num, h.floor
+FROM artwork a JOIN hall h ON a.hall_id = h.hall_id;
+
+ANALYZE artwork, hall;
+
+EXPLAIN
+SELECT a.work_id, a.work_title, a.work_artist, h.hall_num, h.floor
+FROM artwork a JOIN hall h ON a.hall_id = h.hall_id;
+
+EXPLAIN ANALYZE
+SELECT a.work_id, a.work_title, a.work_artist, h.hall_num, h.floor
+FROM artwork a JOIN hall h ON a.hall_id = h.hall_id;
+
+exit
+
+# WAL Files
+
+## as postgres user
+
+ls -ltr $PGDATA/pg_wal
+
