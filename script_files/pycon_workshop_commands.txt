@@ -263,6 +263,15 @@ psql -d firenze -h 10.128.0.6 -U michelangelo
 
 # Joins
 
+## Rows without matches
+
+INSERT INTO HALL (hall_num, floor, description)
+VALUES ('58',1,'Andrea del Sarto');
+
+insert into artwork (work_title, work_artist)
+VALUES ('Medusa', 'Caravaggio');
+
+
 ## Inner join
 
 SELECT a.work_id, a.work_title, a.work_artist,
@@ -290,6 +299,17 @@ SELECT a.work_id, a.work_title, a.work_artist,
        h.hall_num, h.floor
 FROM   artwork a FULL JOIN hall h
 ON     a.hall_id = h.hall_id;
+
+## Cross join
+
+SELECT a.work_id, a.work_title, a.work_artist,
+       h.hall_num, h.floor
+FROM   artwork a JOIN hall h;
+
+SELECT a.work_id, a.work_title, a.work_artist,
+       h.hall_num, h.floor
+FROM   artwork a CROSS JOIN hall h;
+
 
 EXPLAIN
 SELECT a.work_id, a.work_title, a.work_artist, h.hall_num, h.floor
