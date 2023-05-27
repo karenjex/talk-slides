@@ -201,7 +201,7 @@ SELECT work_id, work_title||' by '||work_artist AS artwork_desc
 FROM artwork
 ORDER BY work_artist;
 
-SELECT * FROM artwork_description;
+SELECT * FROM artwork_desc_view;
 
 CREATE MATERIALIZED VIEW artwork_desc_mview
 TABLESPACE duomo AS
